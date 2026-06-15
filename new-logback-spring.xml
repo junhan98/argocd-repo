@@ -1,0 +1,95 @@
+<configuration>
+
+    <!-- ========== 1. Spring 属性注入 ========== -->
+    <springProperty scope="context" name="appname"  source="spring.application.name" defaultValue="app"/>
+    <springProperty scope="context" name="logtype"  source="spring.profiles.active"  defaultValue="default"/>
+    <springProperty scope="context" name="team"     source="app.team"                defaultValue="arena"/>
+
+    <!-- ========== 2. K8s 上下文(由 Deployment 注入,缺失则用占位符) ==========
+         这些环境变量由 K8s Downward API 注入,见第五章 YAML。
+         logback 默认值语法: ${VAR:-defaultValue} -->
+    <property name="K8S_POD_NAME"     value="${K8S_POD_NAME:-}"/>
+    <property name="K8S_POD_NAMESPACE" value="${K8S_POD_NAMESPACE:-}"/>
+    <property name="K8S_POD_IP"        value="${K8S_POD_IP:-}"/>
+    <property name="K8S_NODE_NAME"     value="${K8S_NODE_NAME:-}"/>
+    <property name="K8S_NODE_IP"       value="${K8S_NODE_IP:-}"/>
+
+    <!-- ========== 3. 统一 PATTERN(所有环境共用) ==========
+         - 关键字段前置,方便 grep 与 SLS 字段提取
+         - 多写一次 traceId 是为了: 即便 Logtail 解析失败,
+           人眼看 / kubectl logs 直接能看到上下文 -->
+    <property name="PATTERN"
+              value="%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [app=${appname}] [env=${logtype}] [team=${team}] [ns=${K8S_POD_NAMESPACE}] [pod=${K8S_POD_NAME}] [podIp=${K8S_POD_IP}] [node=${K8S_NODE_NAME}] [traceId=%X{traceId}] [spanId=%X{spanId}] [eId=%X{EagleEye-TraceID}] [%thread] %logger{40} - %msg%n"/>
+
+    <!-- ========== 4. STDOUT(主输出,所有环境都用) ========== -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <!-- 容器内 immediateFlush 必须 true:
+             false 时 logback 会缓冲,容器突然挂掉可能丢最后几行 -->
+        <immediateFlush>true</immediateFlush>
+        <target>System.out</target>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <charset>UTF-8</charset>
+            <pattern>${PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ========== 5. 过渡期:WARNING 仍落盘(可选)
+         推荐上云稳定后下线,改用 SLS 告警规则(见文档第七点) -->
+    <!--
+	<springProfile name="test,cloudtest,uat,clouduat,prd,cloudprd">
+        <appender name="WARNING-FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>/logs/${appname}/${appname}-warning.log</file>
+            <immediateFlush>true</immediateFlush>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>WARN</level>
+            </filter>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>/logs/${appname}/${appname}-warning.log.%d{yyyy-MM-dd}.gz</fileNamePattern>
+                <maxHistory>30</maxHistory>
+            </rollingPolicy>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>${PATTERN}</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+	-->
+	
+	<!-- ========== 6. ⭐ 新增: 全量日志兜底落盘(SLS 异常时备用) ==========
+         关键设计:
+         - immediateFlush=true 保证容器挂了不丢最后几行
+         - 不带 ThresholdFilter,所有级别都写(WARN 也会同时进 WARNING-FILE,这是有意为之)
+         - maxFileSize + totalSizeCap 双重保险,防止磁盘爆
+         - 保留 30 天,够排查绝大部分问题
+         - 加 prudent=false 多线程安全但牺牲少量性能
+    -->
+    <springProfile name="test,cloudtest,uat,clouduat,prd,cloudprd">
+        <appender name="FILE-ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>/logs/${appname}/${HOSTNAME}-all.log</file>
+            <immediateFlush>true</immediateFlush>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <!-- 按天切,同时单个文件超 500MB 强制切 -->
+                <fileNamePattern>/logs/${appname}/${HOSTNAME}-all.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>500MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <!-- 总大小上限 30GB,超过自动删最老的 -->
+                <totalSizeCap>30GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder>
+                <charset>UTF-8</charset>
+                <pattern>${PATTERN}</pattern>
+            </encoder>
+        </appender>
+    </springProfile>
+
+    <!-- ========== 6. Root + 业务 logger ========== -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>          <!-- 主输出: stdout -->
+        <!-- <appender-ref ref="WARNING-FILE"/> ->   <!-- 过渡期: WARN 单独落盘(可选) -->
+		<appender-ref ref="FILE-ALL"/>        <!-- ⭐ 全量兜底落盘(SLS 异常时查询) -->
+    </root>
+
+    <!-- 原来的业务 logger,保留 -->
+    <logger name="com.postar.online" level="DEBUG"/>
+
+</configuration>
