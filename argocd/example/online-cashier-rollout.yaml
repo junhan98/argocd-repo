@@ -47,7 +47,7 @@ spec:
       # ⭐ K8s 上下文注入(logback 用,新增)
       containers:
         - name: online-cashier
-          image: online-pay-registry-vpc.cn-shanghai.cr.aliyuncs.com/online-pay-uat/online-cashier:uat-20260615.19
+          image: online-pay-registry-vpc.cn-shanghai.cr.aliyuncs.com/online-pay-uat/online-cashier:uat-20260615.20
           imagePullPolicy: Always
 
           env:
