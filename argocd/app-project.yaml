@@ -1,0 +1,11 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: online-uat-project
+  namespace: argocd
+spec:
+  sourceRepos:
+  - 'https://github.com/junhan98/argocd-repo.git'
+  destinations:
+  - namespace: default
+    name: online-pay-uat   # 直接使用你在 argocd cluster list 中看到的 NAME

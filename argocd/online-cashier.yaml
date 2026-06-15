@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: online-cashier
+  name: online-cashier
+  namespace: default
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: online-cashier
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        redeploy-timestamp: "1781494209296"
+      labels:
+        app: online-cashier
+    spec:
+      containers:
+      - env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        image: online-pay-registry-vpc.cn-shanghai.cr.aliyuncs.com/online-pay-uat/online-cashier:uat-20260615.17
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /live
+            port: 22222
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 2
+        name: online-cashier
+        ports:
+        - containerPort: 60019
+          name: app-port-60019
+          protocol: TCP
+        - containerPort: 22222
+          name: app-port-22222
+          protocol: TCP
+        - containerPort: 60023
+          name: app-port-60023
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /ready
+            port: 22222
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+        startupProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /startup
+            port: 22222
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /online-cashier-tmp
+          name: volume-1777024188253
+        - mountPath: /logs/online-cashier
+          name: volume-1779865785701
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+      - name: online-pay-uat
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: volume-1777024188253
+      - name: volume-1779865785701
+        persistentVolumeClaim:
+          claimName: online-pay-uat-log
+status:

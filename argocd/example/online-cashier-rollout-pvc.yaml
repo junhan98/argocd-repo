@@ -1,0 +1,14 @@
+# online-cashier-log-pvc.yaml
+# ⭐ 用你新建的 online-cashier-test SC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: online-cashier-log    # ⬅️ 这个 name 要跟 Rollout 里 claimName 一致
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany           # ⭐ NAS 必须 RWX,多副本共享
+  storageClassName: online-cashier-test
+  resources:
+    requests:
+      storage: 50Gi           # 30天 × 1GB/天 ≈ 30Gi,留余量

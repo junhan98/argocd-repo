@@ -1,0 +1,128 @@
+# online-cashier-rollout.yaml
+# 用于 Argo Rollouts 部署,带日志兜底
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  # ⭐ Rollout name 跟原 Deployment 一致,避免 Service selector 找不到
+  name: online-cashier
+  namespace: default
+  labels:
+    app: online-cashier
+spec:
+  replicas: 2                       # ⭐ 必填 ≥1,Rollout 才能做灰度
+  revisionHistoryLimit: 10          # 跟原 Deployment 一致
+  selector:
+    matchLabels:
+      app: online-cashier
+
+  # ========== 1. 灰度策略(Canary)==========
+  strategy:
+    canary:
+      canaryService: online-cashier-canary    # 关键:金丝雀 Service
+      stableService: online-cashier-stable    # 关键:稳定版 Service
+      maxSurge: "25%"
+      maxUnavailable: "25%"
+      #trafficRouting:
+        # ⭐ 阿里云 SLB 流量切分(如果你有 SLB,改成下面的阿里云方式)
+        # 默认走 K8s Service,简单场景够用
+        # 进阶:用 istio/nginx ingress/aliyun slb 做精确切流
+      steps:
+        #- setWeight: 5              # 先 5% 流量
+        #- pause: { duration: 5m }   # 观察 5 分钟
+        #- setWeight: 20
+        #- pause: { duration: 5m }
+        - setWeight: 50
+        - pause: {}
+        - setWeight: 100
+
+  # ========== 2. Pod 模板(跟原 Deployment 基本一致)==========
+  template:
+    metadata:
+      labels:
+        app: online-cashier
+    spec:
+      # ⭐ 优雅退出时间(保留原值 30s)
+      terminationGracePeriodSeconds: 30
+
+      # ⭐ K8s 上下文注入(logback 用,新增)
+      containers:
+        - name: online-cashier
+          image: online-pay-registry-vpc.cn-shanghai.cr.aliyuncs.com/online-pay-uat/online-cashier:uat-20260615.19
+          imagePullPolicy: Always
+
+          env:
+            # ⭐ logback 的 K8S_POD_NAME 用 HOSTNAME 已经有了,但 logback 还需这些
+            - name: K8S_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: K8S_POD_NAMESPACE
+              valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+            - name: K8S_POD_IP
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - name: K8S_NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: K8S_NODE_IP
+              valueFrom: { fieldRef: { fieldPath: status.hostIP } }
+            # 保留你原来的 POD_NAME
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+
+          ports:
+            - containerPort: 60019
+              name: app-port-60019
+              protocol: TCP
+            - containerPort: 22222
+              name: app-port-22222
+              protocol: TCP
+            - containerPort: 60023
+              name: app-port-60023
+              protocol: TCP
+
+          # ========== 探针(完全保留你原配置)==========
+          livenessProbe:
+            failureThreshold: 3
+            httpGet: { path: /live, port: 22222, scheme: HTTP }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 2
+          readinessProbe:
+            failureThreshold: 3
+            httpGet: { path: /ready, port: 22222, scheme: HTTP }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          startupProbe:
+            failureThreshold: 3
+            httpGet: { path: /startup, port: 22222, scheme: HTTP }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+
+          # ========== 3. Volume 挂载(保留 2 个)==========
+          volumeMounts:
+            # ⭐ 日志落盘目录:继续用 PVC 兜底
+            - mountPath: /logs/online-cashier
+              name: online-cashier-log-vol
+
+      dnsPolicy: ClusterFirst
+      imagePullSecrets:
+        - name: online-pay-uat
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+
+      # ========== 4. Volumes(保留 2 个)==========
+      volumes:
+        # ⭐ 日志 PVC(你原来已经接 NAS 的话不用改)
+        - name: online-cashier-log-vol
+          persistentVolumeClaim:
+            claimName: online-cashier-log
+
